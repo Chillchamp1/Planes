@@ -183,6 +183,20 @@ const pick = role => RGB[role];
 const css  = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 const rgba = (c,a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
+/* Dot size per category, the way the rail map sizes a regional train below
+   an ICE. DOT_R is the base radius everything scales from. */
+const DOT_R = 1.9;
+const CLASS_SIZE = {domestic:0.34, european:0.42, longhaul:0.52};
+
+/* The trail is a window in *time*, not a fraction of the journey: it shows
+   where the aircraft was over the last TRAIL_MIN simulated minutes. That is
+   what makes it read as speed -- a long-haul jet at 900 km/h lays down more
+   than twice the streak a domestic hop does in the same window, because it
+   genuinely covered more ground. Drawn as segments so it can fade out
+   behind, and it grows out of the airport at departure rather than
+   appearing full-length. */
+const TRAIL_MIN = 14, TRAIL_STEPS = 8;
+
 const CLASS_LABEL = {
   domestic: "Domestic — within Germany",
   european: "European",
@@ -230,6 +244,8 @@ function resize(){
   VIEW = {lon0,lon1,lat0,lat1};
   OX = 0; OY = 0; SX = W; SY = H;
 
+  for (const s of ST){ s.x = OX+ux(s.lon)*SX; s.y = OY+uy(s.lat)*SY; }
+
   base = document.createElement("canvas");
   base.width = cv.width; base.height = cv.height;
   baseCtx = base.getContext("2d");
@@ -270,56 +286,74 @@ function renderBase(){
     b.lineWidth = 1.0;
     b.stroke(pathLand);
   }
+  /* Every airport in the day gets a dot, the way every station does on the
+     rail maps -- so the network is visible even at an hour when nothing is
+     flying. Sized against the largest aircraft dot so they stay the
+     substrate and never outweigh the thing that is moving. */
+  const rBig = DOT_R * Math.max(...Object.values(CLASS_SIZE));
+  const rHub = rBig * 1.05, rMid = rBig * 0.72, rSml = rBig * 0.5;
   const cSt = pick("station"), cHub = pick("hub");
   for (const s of ST){
     if (s.x < -20 || s.x > W+20 || s.y < -20 || s.y > H+20) continue;
+    const r = s.tier === 2 ? rHub : s.tier === 1 ? rMid : rSml;
     b.beginPath();
-    b.arc(s.x, s.y, s.hub ? 2.0 : 1.1, 0, 6.2832);
-    b.fillStyle = rgba(s.hub ? cHub : cSt, s.hub ? 0.95 : 0.6);
+    b.arc(s.x, s.y, r, 0, 6.2832);
+    b.fillStyle = rgba(s.tier === 2 ? cHub : cSt,
+                       s.tier === 2 ? 0.95 : s.tier === 1 ? 0.75 : 0.55);
     b.fill();
   }
   for (const L of PLACED){
-    b.font = '400 11px "IBM Plex Sans",system-ui,sans-serif';
+    b.font = `400 ${L.major?11:10}px "IBM Plex Sans",system-ui,sans-serif`;
     b.textAlign = L.align; b.textBaseline = "middle";
-    b.fillStyle = rgba(pick(L.major?"ink2":"ink3"), L.major?0.95:0.75);
+    b.fillStyle = rgba(pick(L.major?"ink2":"ink3"), L.major?0.95:0.7);
     b.fillText(L.label, L.tx, L.ty);
   }
   baseReady = true;
 }
 
-/* City labels: majors first, each trying its preferred side then the
-   flipped side, skipping anything that would collide with an
-   already-placed label. Simple, and this map only needs a dozen names. */
-const CITIES = [
-  ["Frankfurt",50.0379,8.5622,1], ["Munich",48.3538,11.7861,1],
-  ["Berlin",52.3667,13.5033,1],   ["Düsseldorf",51.2895,6.7668,1],
-  ["Hamburg",53.6304,9.9882,1],   ["Stuttgart",48.6899,9.2220,1],
-  ["Cologne",50.8659,7.1427,0],   ["Vienna",48.1103,16.5697,0],
-  ["Zurich",47.4647,8.5492,0],    ["Amsterdam",52.3086,4.7639,0],
-  ["London",51.4700,-0.4543,0],   ["Paris",49.0097,2.5479,0],
-  ["Madrid",40.4936,-3.5668,0],   ["Rome",41.8003,12.2389,0],
-  ["Copenhagen",55.6180,12.6560,0], ["Warsaw",52.1657,20.9671,0],
-  ["Moscow",55.9736,37.4125,0],   ["Istanbul",41.2753,28.7519,0],
-  ["Dubai",25.2532,55.3657,0],    ["New York",40.6413,-73.7781,0],
-];
+/* Airport labels, not city labels. The busiest airports of the day are
+   named the way the rail maps name cities: majors first, each trying its
+   preferred side, then the flipped side, then below, and skipping anything
+   that would collide with a label already placed. Several airports share a
+   municipality (London has three in this data, Berlin two), so the busiest
+   one keeps the name and the others stay as unlabelled dots -- two "London"s
+   on one map is worse than one. */
+let LABELS = [];
 let PLACED = [];
+
+function buildLabels(){
+  const seen = new Set();
+  LABELS = [...ST]
+    .map((s, i) => ({s, i}))
+    .sort((a, b) => b.s.calls - a.s.calls)
+    .filter(({s}) => {
+      if (seen.has(s.name)) return false;
+      seen.add(s.name);
+      return true;
+    })
+    .slice(0, 26)
+    .map(({s}, rank) => ({st:s, label:s.name, major: rank < 8}));
+}
+
 function placeLabels(){
   PLACED = [];
   ctx.font = '400 11px "IBM Plex Sans",system-ui,sans-serif';
   const taken = [];
-  const hits = r => r.x<2 || r.y<2 || r.x+r.w>W-2 ||
+  const hits = r => r.x<2 || r.y<2 || r.x+r.w>W-2 || r.y+r.h>H-2 ||
     taken.some(t => r.x<t.x+t.w && r.x+r.w>t.x && r.y<t.y+t.h && r.y+r.h>t.y);
-  for (const [label,lat,lon,major] of CITIES){
-    const x = OX+ux(lon)*SX, y = OY+uy(lat)*SY;
+  for (const L of LABELS){
+    const x = L.st.x, y = L.st.y;
     if (x < -20 || x > W+20 || y < -20 || y > H+20) continue;
-    const tw = ctx.measureText(label).width;
+    ctx.font = `400 ${L.major?11:10}px "IBM Plex Sans",system-ui,sans-serif`;
+    const tw = ctx.measureText(L.label).width;
     const opts = [
       {tx:x+9, ty:y, align:"left",  x:x+7,  y:y-6, w:tw+6, h:12},
       {tx:x-9, ty:y, align:"right", x:x-9-tw, y:y-6, w:tw+6, h:12},
       {tx:x, ty:y+13, align:"center", x:x-tw/2-2, y:y+7, w:tw+4, h:12},
+      {tx:x, ty:y-13, align:"center", x:x-tw/2-2, y:y-19, w:tw+4, h:12},
     ];
     for (const o of opts){
-      if (!hits(o)){ taken.push(o); PLACED.push({...o, label, major}); break; }
+      if (!hits(o)){ taken.push(o); PLACED.push({...o, label:L.label, major:L.major}); break; }
     }
   }
 }
@@ -365,31 +399,51 @@ function draw(){
     if (simMin < dep || simMin > arr) continue;
     const cls = DATA.classes[t.c];
     counts[cls]++;
-    const oi = t.s[0][0], di = t.s[1][0];
-    const o = ST[oi], d = ST[di];
-    const f = arr>dep ? (simMin-dep)/(arr-dep) : 0;
-    const ox = OX+ux(o.lon)*SX, oy = OY+uy(o.lat)*SY;
-    const dx = OX+ux(d.lon)*SX, dy = OY+uy(d.lat)*SY;
-    const x = ox+(dx-ox)*f, y = oy+(dy-oy)*f;
+    const o = ST[t.s[0][0]], d = ST[t.s[1][0]];
+    const span = arr - dep;
+    const at = m => {           // screen position at a simulated minute
+      const f = span > 0 ? (m - dep) / span : 0;
+      return [o.x + (d.x - o.x) * f, o.y + (d.y - o.y) * f];
+    };
+    const [x, y] = at(simMin);
     const col = pick(CLASS_ROLE[cls]);
-    // Trail back toward departure -- a comet, not a dot on a wire.
-    const tf = Math.max(0, f-0.12);
-    const tx = ox+(dx-ox)*tf, ty = oy+(dy-oy)*tf;
-    ctx.strokeStyle = rgba(col, 0.35);
-    ctx.lineWidth = 1.1;
-    ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(x,y); ctx.stroke();
-    // A ring that opens at departure and fades over a few minutes.
-    const sinceStart = simMin-dep;
+    const scale = CLASS_SIZE[cls];
+
+    /* Walk back through the trail window a step at a time, clamped at the
+       departure so the streak grows out of the airport. */
+    let px = x, py = y;
+    for (let k = 1; k <= TRAIL_STEPS; k++){
+      const m = simMin - (TRAIL_MIN / TRAIL_STEPS) * k;
+      if (m < dep) {
+        const [bx, by] = at(dep);
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(bx, by);
+        ctx.strokeStyle = rgba(col, (1 - k/TRAIL_STEPS) * 0.5);
+        ctx.lineWidth = Math.max(1/DPR, 2.2 * scale * (1 - k/(TRAIL_STEPS+3)));
+        ctx.lineCap = "round"; ctx.stroke();
+        break;
+      }
+      const [bx, by] = at(m);
+      const a = (1 - k/TRAIL_STEPS) * 0.5;
+      if (a <= 0.02) break;
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(bx, by);
+      ctx.strokeStyle = rgba(col, a);
+      ctx.lineWidth = Math.max(1/DPR, 2.2 * scale * (1 - k/(TRAIL_STEPS+3)));
+      ctx.lineCap = "round"; ctx.stroke();
+      px = bx; py = by;
+    }
+
+    // A ring that opens where the aircraft left the ground, then fades.
+    const sinceStart = simMin - dep;
     if (sinceStart >= 0 && sinceStart < 6){
-      const rf = sinceStart/6;
-      ctx.beginPath(); ctx.arc(ox,oy, 1.2+rf*6, 0, 6.2832);
-      ctx.strokeStyle = rgba(col, (1-rf)*0.5); ctx.lineWidth = 1;
+      const rf = sinceStart / 6;
+      ctx.beginPath(); ctx.arc(o.x, o.y, 1.2 + rf*6, 0, 6.2832);
+      ctx.strokeStyle = rgba(col, (1-rf) * 0.5); ctx.lineWidth = 1;
       ctx.stroke();
     }
-    ctx.beginPath(); ctx.arc(x,y, 1.9, 0, 6.2832);
+    ctx.beginPath(); ctx.arc(x, y, DOT_R * scale + 0.5, 0, 6.2832);
     ctx.fillStyle = css(col);
     ctx.fill();
-    hitList.push({x,y,name:t.n||"", from:o.name, to:d.name, cls});
+    hitList.push({x, y, name:t.n||"", from:o.name, to:d.name, cls});
   }
   const [h,m] = hm(simMin);
   elHrs.textContent = h; elMins.textContent = ":" + m;
@@ -446,9 +500,17 @@ function applyData(data, geo){
   DATA = data; GEO = geo;
   ST = data.stations.map(s => ({lon:s[0], lat:s[1], name:s[2], calls:0, x:0, y:0}));
   for (const t of data.trips){ ST[t.s[0][0]].calls++; ST[t.s[1][0]].calls++; }
-  const sorted = ST.map(s=>s.calls).sort((a,b)=>b-a);
-  const cut = sorted[Math.min(11, sorted.length-1)] || 0;
-  for (const s of ST) s.hub = s.calls >= Math.max(cut, 8);
+  /* Three tiers by how much traffic an airport actually saw that day, the
+     way the rail maps pick out hubs by number of calls rather than by any
+     fixed list: the top dozen are the hubs, the next slice reads a shade
+     smaller, everything else is a plain dot. */
+  const sorted = ST.map(s => s.calls).sort((a, b) => b - a);
+  const cutHub = sorted[Math.min(11, sorted.length-1)] || 0;
+  const cutMid = sorted[Math.min(44, sorted.length-1)] || 0;
+  for (const s of ST)
+    s.tier = s.calls >= Math.max(cutHub, 8) ? 2
+           : s.calls >= Math.max(cutMid, 3) ? 1 : 0;
+  buildLabels();
   buildProfile();
 
   const total = data.trips.length;

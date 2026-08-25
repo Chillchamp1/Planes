@@ -59,6 +59,19 @@ way a cross-border train used to fly off the edge of a single-country rail
 map — the dot keeps moving correctly, it just leaves the visible frame,
 because the subject is Germany's sky, not the world's.
 
+Each aircraft trails a streak showing **where it was over the last 14
+simulated minutes**. The trail is a window in time, not a fixed fraction of
+the journey, so its length *is* the aircraft's speed: a long-haul jet at 900
+km/h lays down more than twice the streak a domestic hop does, because in
+those fourteen minutes it genuinely covered more than twice the ground.
+
+Every airport in the day gets a dot, in three sizes by how much traffic it
+actually saw — the same way the rail maps size a station by its number of
+calls rather than from a fixed list. The busiest two dozen are named. Where
+several airports share a city the busiest one keeps the name (London has
+three in this data), except Berlin, which really did have two working
+airports in January 2020 and gets both.
+
 Hover a dot for its callsign and route. The strip behind the scrubber shows
 departures per 15 minutes across the day.
 
@@ -87,6 +100,23 @@ departures per 15 minutes across the day.
 - **1,014 flights were dropped for missing an endpoint.** origin or
   destination is blank in the source data when OpenSky's own matching
   couldn't resolve an airport from the trajectory.
+- **A closed airport can steal a live airport's code.** OurAirports
+  reassigns the ident of an airport that has shut and moves its old ICAO
+  code into a free-text `keywords` column. Those keywords have to be indexed
+  or Berlin-Tegel — open and busy on this day, closed since 2020 — would
+  vanish from the map. But indexing them naively lets a dead airport outrank
+  a live one: Munich-Riem closed in **1992**, still carries `EDDM` in its
+  keywords, and sorts ahead of Franz Josef Strauss in the file, which put
+  all 672 Munich flights 24 km southwest of the airport they actually used.
+  `load_airports()` now claims official codes in a first pass and lets
+  keywords fill only what nothing live claims.
+- **Airport labels come from the city, not the parish.** OurAirports'
+  `municipality` is where the runway physically sits, which is often not the
+  city the airport is known as — Brussels Airport is in Zaventem, Leipzig/
+  Halle is in Schkeuditz, Milan Malpensa is in "Ferno (VA)". Parentheses and
+  anything after a comma are stripped ("Paris (Roissy-en-France,
+  Val-d'Oise)" → Paris), and a four-entry override table in the builder
+  handles the rest.
 - **A flight belongs to the day its departure falls on**, in local time
   (CET, UTC+1 in January) — not the source file's own `day` column, which
   tags by *last* message instead. This matters the way it matters for a
@@ -146,6 +176,9 @@ project it borrows its look from:
 - No zoom or pan — one fixed frame.
 - No video export.
 - No distinction by aircraft type or airline, only by distance.
+- Flights fly great-circle-straight between airports. Real routings bend
+  around airspace and follow tracks; this dataset carries only the two
+  endpoints, so the line between them is the honest thing to draw.
 - Frankfurt and Munich dominate visually because they are Germany's two
   long-haul hubs; that is real, not a rendering artefact.
 

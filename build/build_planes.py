@@ -26,7 +26,7 @@ last-seen is the last message before landing or leaving coverage. Close enough
 to treat as departure and arrival for an animation; the difference is a
 caveat, not an error.
 """
-import argparse, csv, gzip, io, json, math, os, sys
+import argparse, csv, gzip, io, json, math, os, re, sys
 from datetime import date, timedelta
 
 # Distance from the German endpoint decides the category. Domestic and
@@ -49,13 +49,42 @@ def classify(km, both_de):
     return "european" if km < 3000 else "longhaul"
 
 
+# Where OurAirports' municipality is the parish the runway sits in rather
+# than the city the airport serves and is known as. Everything else is
+# handled by stripping parentheses and anything after a comma.
+LABEL_FIX = {
+    "EBBR": "Brussels",       # municipality: Zaventem
+    "EDDP": "Leipzig",        # municipality: Schkeuditz
+    "LIMC": "Milan Malpensa", # municipality: Ferno (VA)
+    "LIML": "Milan Linate",   # municipality: Segrate (MI)
+    "EDDT": "Berlin Tegel",   # two Berlin airports were open in 2020
+    "EDDB": "Berlin Schönefeld",
+}
+
+
+def clean_label(municipality, name):
+    """A name a reader recognises. "Paris (Roissy-en-France, Val-d'Oise)"
+    and "Manchester, Greater Manchester" are the same city twice over."""
+    label = (municipality or name or "").strip()
+    label = re.sub(r"\s*\(.*", "", label)
+    label = label.split(",")[0]
+    return label.strip()
+
+
 def load_airports(path):
-    """ICAO/IATA/old-code -> (lat, lon, name, municipality). OurAirports
-    reassigns a closed airport's ident (Tegel is 'DE-0876' now) and moves its
-    old codes into a free-text keywords column, so those are indexed too --
-    otherwise every airport that closed before this file was built vanishes
-    from a dataset about when it was still open."""
-    air = {}
+    """code -> (lat, lon, name, municipality).
+
+    Two passes on purpose. OurAirports reassigns a closed airport's ident
+    (Berlin-Tegel is 'DE-0876' now) and moves its old ICAO code into a
+    free-text keywords column, which has to be indexed or every airport that
+    shut before this file was written vanishes from a dataset about when it
+    was still open. But a keyword must never outrank a live airport's real
+    code: Munich-Riem closed in 1992 and still carries 'EDDM' in its
+    keywords, and it sorts ahead of Franz Josef Strauss in the file, so a
+    single pass silently put every Munich flight 24 km southwest of the
+    airport it actually used. Official codes are claimed first; keywords
+    only fill what nothing live claims."""
+    air, rows = {}, []
     with open(path, encoding="utf-8") as f:
         for r in csv.DictReader(f):
             try:
@@ -63,13 +92,15 @@ def load_airports(path):
                        r["name"], r["municipality"])
             except ValueError:
                 continue
+            rows.append((r, rec))
             for key in (r["icao_code"], r["gps_code"], r["ident"], r["iata_code"]):
                 if key:
                     air.setdefault(key, rec)
-            for kw in (r["keywords"] or "").split(","):
-                kw = kw.strip()
-                if len(kw) in (3, 4) and kw.isalnum():
-                    air.setdefault(kw, rec)
+    for r, rec in rows:
+        for kw in (r["keywords"] or "").split(","):
+            kw = kw.strip()
+            if len(kw) in (3, 4) and kw.isalnum():
+                air.setdefault(kw, rec)
     return air
 
 
@@ -190,7 +221,7 @@ def main():
             return st_index[code]
         i = len(stations)
         st_index[code] = i
-        label = city if city else name
+        label = LABEL_FIX.get(code) or clean_label(city, name)
         stations.append([round(lon, 4), round(lat, 4), label])
         return i
 
