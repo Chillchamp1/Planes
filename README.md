@@ -6,7 +6,7 @@ airport, built from actual radar data. It is the same idea as
 was forked in spirit from — a dark map, a running clock, every scheduled
 movement as a dot — applied to planes instead of trains.
 
-**Live: https://chillchamp1.github.io/planes/**
+**Live: https://chillchamp1.github.io/Planes/**
 
 ## Why this looks different from the rail maps
 
@@ -53,17 +53,26 @@ doesn't reliably carry):
 - **European** — under 3,000 km
 - **Long-haul** — everything further: North America, the Gulf, East Asia
 
-The frame is centred on Germany and reaches from the mid-Atlantic to western
-Russia. A flight to Los Angeles or Tokyo flies off the edge of it, the same
-way a cross-border train used to fly off the edge of a single-country rail
-map — the dot keeps moving correctly, it just leaves the visible frame,
-because the subject is Germany's sky, not the world's.
+The frame is Germany's, centred on the country's own centre point (10.45°E,
+51.2°N): Germany fills most of the height and the rest of Europe is hinted
+at the edges rather than mapped. A flight to Los Angeles or Tokyo leaves the
+frame within minutes, the same way a cross-border train used to leave the
+edge of a single-country rail map — the dot keeps moving correctly, it just
+stops being the subject.
 
-Each aircraft trails a streak showing **where it was over the last 14
+A tall phone screen has to get its extra height from somewhere. Padding the
+top and bottom is the obvious answer and the wrong one: it stretches the
+frame from the Alps to central Sweden and leaves Germany filling barely a
+third of the screen. So the latitude span is capped and the frame narrows
+instead, never past the country plus a margin.
+
+Each aircraft trails a streak showing **where it was over the last five
 simulated minutes**. The trail is a window in time, not a fixed fraction of
 the journey, so its length *is* the aircraft's speed: a long-haul jet at 900
-km/h lays down more than twice the streak a domestic hop does, because in
-those fourteen minutes it genuinely covered more than twice the ground.
+km/h lays down nearly twice the streak a domestic hop does, because in those
+five minutes it genuinely covered nearly twice the ground. Five is set
+against the frame rather than the clock — about 6% of the map's width for a
+jet at cruise, the same share of the frame the rail maps give an ICE.
 
 Every airport in the day gets a dot, in three sizes by how much traffic it
 actually saw — the same way the rail maps size a station by its number of

@@ -54,6 +54,7 @@
   .lg{display:flex;align-items:center;gap:9px;padding:3px 0}
   .lg .sw{width:8px;height:8px;border-radius:50%;flex:none}
   .lg .nm{flex:1 1 auto;color:var(--ink)}
+  .lg .sh{display:none;color:var(--ink)}
   .lg .n{font-family:"IBM Plex Mono",monospace;font-size:0.76rem;
          color:var(--ink-2);font-variant-numeric:tabular-nums}
   #key p{margin-top:9px;padding-top:9px;border-top:1px solid var(--rule);
@@ -110,17 +111,45 @@
 
   a{color:var(--ink-2)}
 
+  /* On a phone the map is the whole screen, so nothing may sit on top of it
+     except the clock. The legend becomes one flat strip stacked directly
+     above the controls -- swatch, short name, count -- and the prose that
+     belongs beside it on a desktop moves into the Data notes panel, which
+     is a toggle the reader opens deliberately rather than a box in the way. */
   @media (max-width:820px){
-    header{top:14px}
-    #clock{font-size:1.7rem}
-    #meta{top:80px;max-width:calc(100vw - 28px);font-size:0.68rem}
-    #controls{flex-direction:column;left:14px;right:14px;bottom:14px;
-              transform:none;width:auto}
-    #profile{width:100%}
-    #caveats{position:fixed;left:14px;bottom:auto;top:210px;
-             max-width:min(60vw,260px)}
-    #key{width:min(58vw,230px);bottom:auto;top:210px;font-size:0.7rem}
-    #key p{display:none}
+    header{top:10px}
+    #clock{font-size:1.55rem}
+    #running{font-size:0.62rem}
+    #meta{display:none}
+
+    #caveats{left:12px;right:12px;top:auto;bottom:132px;max-width:none}
+    #caveats div{max-height:46vh;overflow-y:auto}
+
+    #key{
+      left:12px;right:12px;bottom:70px;top:auto;width:auto;
+      display:flex;gap:12px;justify-content:space-between;align-items:center;
+      padding:7px 11px;font-size:0.64rem;
+    }
+    #key h2, #key p, .lg .nm{display:none}
+    #keyrows{display:flex;flex:1 1 auto;gap:12px;justify-content:space-between}
+    .lg{padding:0;gap:5px;min-width:0}
+    .lg .sh{display:inline}
+    .lg .sw{width:7px;height:7px}
+    .lg .n{font-size:0.64rem}
+
+    #controls{left:12px;right:12px;bottom:12px;transform:none;width:auto;
+              gap:8px;padding:7px 8px}
+    #profile{flex:1 1 auto;width:auto;height:34px}
+    #controls button{padding:4px 8px;font-size:0.72rem}
+    .spd button{padding:4px 6px;font-size:0.68rem}
+    #scrub::-webkit-slider-thumb{height:34px}
+    #scrub::-moz-range-thumb{height:34px}
+  }
+
+  /* Very narrow: the three legend items still have to fit on one line. */
+  @media (max-width:400px){
+    #key{gap:7px;font-size:0.6rem;padding:6px 8px}
+    .lg .n{font-size:0.6rem}
   }
 </style>
 </head>
@@ -185,8 +214,8 @@ const rgba = (c,a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
 /* Dot size per category, the way the rail map sizes a regional train below
    an ICE. DOT_R is the base radius everything scales from. */
-const DOT_R = 1.9;
-const CLASS_SIZE = {domestic:0.34, european:0.42, longhaul:0.52};
+const DOT_R = 1.6;
+const CLASS_SIZE = {domestic:0.30, european:0.39, longhaul:0.48};
 
 /* The trail is a window in *time*, not a fraction of the journey: it shows
    where the aircraft was over the last TRAIL_MIN simulated minutes. That is
@@ -194,8 +223,13 @@ const CLASS_SIZE = {domestic:0.34, european:0.42, longhaul:0.52};
    than twice the streak a domestic hop does in the same window, because it
    genuinely covered more ground. Drawn as segments so it can fade out
    behind, and it grows out of the airport at departure rather than
-   appearing full-length. */
-const TRAIL_MIN = 14, TRAIL_STEPS = 8;
+   appearing full-length. The window is set against the frame, not the
+   clock: the map now spans about 1,200 km, and five minutes of a long-haul
+   climb-out is roughly 6% of that width -- the same share of the frame the
+   rail map gives an ICE. It was 14 minutes when the frame was Iceland to
+   the Urals; at this scale that would drag a streak across a sixth of the
+   screen. */
+const TRAIL_MIN = 5, TRAIL_STEPS = 7;
 
 const CLASS_LABEL = {
   domestic: "Domestic — within Germany",
@@ -203,12 +237,26 @@ const CLASS_LABEL = {
   longhaul: "Long-haul — outside Europe",
 };
 const CLASS_ROLE = {domestic:"domestic", european:"european", longhaul:"longhaul"};
+/* The legend collapses to a single strip on a phone, where the full label
+   will not fit but a bare colour swatch says nothing. */
+const CLASS_SHORT = {domestic:"Domestic", european:"Europe", longhaul:"Long-haul"};
 
-/* The visible window. Frankfurt to Los Angeles or Tokyo flies off the edge
-   of it, same as a cross-border train used to fly off the edge of a
-   single-country map -- the dot keeps moving correctly, it just leaves the
-   frame, because the point of this map is Germany's sky, not the world's. */
-const CORE = {lon0:-14.0, lon1:34.0, lat0:35.5, lat1:60.0};
+/* The visible window is Germany's, centred on it: the country's own centre
+   (10.45E, 51.2N) is the centre of this box, and it fills about three fifths
+   of the frame's height. Europe is hinted at the edges rather than mapped --
+   a flight to Los Angeles or Tokyo leaves the frame within minutes, same as
+   a cross-border train used to leave the edge of a single-country rail map.
+   The dot keeps moving correctly; it just stops being the subject. */
+const CORE = {lon0:2.0, lon1:19.0, lat0:44.8, lat1:57.6};
+
+/* A tall phone screen has to get its extra height from somewhere. Fitting
+   CORE whole and padding the top and bottom is the obvious answer, and it is
+   the wrong one: on a 360x740 portrait it stretches the frame from the Alps
+   to central Sweden and leaves Germany filling barely a third of the height.
+   So the latitude span is capped, and the frame narrows instead -- down to
+   MINW, which is Germany plus a margin and never crops the country itself. */
+const MAX_LAT = 17.0;
+const MINW = {lon0:4.6, lon1:16.3};
 
 let GEO = null, DATA = null, ST = [];
 let W=0, H=0, OX=0, OY=0, SX=0, SY=0, DPR=1;
@@ -231,17 +279,21 @@ function resize(){
   cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
   ctx.setTransform(dpr,0,0,dpr,0,0);
   const k = Math.cos(((CORE.lat0+CORE.lat1)/2) * Math.PI/180);
-  const w = (CORE.lon1-CORE.lon0)*k, h = CORE.lat1-CORE.lat0;
   const aspect = W/H;
-  let {lon0,lon1,lat0,lat1} = CORE;
-  if (aspect > w/h){
-    const extra = aspect*h/k - (lon1-lon0);
-    lon0 -= extra/2; lon1 += extra/2;
+  const lonC = (CORE.lon0+CORE.lon1)/2, latC = (CORE.lat0+CORE.lat1)/2;
+  let dlon = CORE.lon1-CORE.lon0, dlat = CORE.lat1-CORE.lat0;
+  if (aspect > dlon*k/dlat){
+    dlon = aspect*dlat/k;                       // wide screen: widen
   } else {
-    const extra = w/aspect - h;
-    lat0 -= extra/2; lat1 += extra/2;
+    dlat = dlon*k/aspect;                       // tall screen: heighten
+    if (dlat > MAX_LAT){                        // ...but only so far
+      dlat = MAX_LAT;
+      dlon = Math.max(MINW.lon1-MINW.lon0, dlat*aspect/k);
+      dlat = dlon*k/aspect;                     // MINW may re-raise it
+    }
   }
-  VIEW = {lon0,lon1,lat0,lat1};
+  VIEW = {lon0:lonC-dlon/2, lon1:lonC+dlon/2,
+          lat0:latC-dlat/2, lat1:latC+dlat/2};
   OX = 0; OY = 0; SX = W; SY = H;
 
   for (const s of ST){ s.x = OX+ux(s.lon)*SX; s.y = OY+uy(s.lat)*SY; }
@@ -418,7 +470,7 @@ function draw(){
         const [bx, by] = at(dep);
         ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(bx, by);
         ctx.strokeStyle = rgba(col, (1 - k/TRAIL_STEPS) * 0.5);
-        ctx.lineWidth = Math.max(1/DPR, 2.2 * scale * (1 - k/(TRAIL_STEPS+3)));
+        ctx.lineWidth = Math.max(1/DPR, 2.4 * scale * (1 - k/(TRAIL_STEPS+3)));
         ctx.lineCap = "round"; ctx.stroke();
         break;
       }
@@ -427,7 +479,7 @@ function draw(){
       if (a <= 0.02) break;
       ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(bx, by);
       ctx.strokeStyle = rgba(col, a);
-      ctx.lineWidth = Math.max(1/DPR, 2.2 * scale * (1 - k/(TRAIL_STEPS+3)));
+      ctx.lineWidth = Math.max(1/DPR, 2.4 * scale * (1 - k/(TRAIL_STEPS+3)));
       ctx.lineCap = "round"; ctx.stroke();
       px = bx; py = by;
     }
@@ -440,7 +492,7 @@ function draw(){
       ctx.strokeStyle = rgba(col, (1-rf) * 0.5); ctx.lineWidth = 1;
       ctx.stroke();
     }
-    ctx.beginPath(); ctx.arc(x, y, DOT_R * scale + 0.5, 0, 6.2832);
+    ctx.beginPath(); ctx.arc(x, y, DOT_R * scale, 0, 6.2832);
     ctx.fillStyle = css(col);
     ctx.fill();
     hitList.push({x, y, name:t.n||"", from:o.name, to:d.name, cls});
@@ -526,6 +578,7 @@ function applyData(data, geo){
     div.className = "lg";
     div.innerHTML = `<span class="sw" style="background:${css(col)}"></span>` +
       `<span class="nm">${CLASS_LABEL[c]}</span>` +
+      `<span class="sh">${CLASS_SHORT[c]}</span>` +
       `<span class="n" id="kc-${c}">${data.counts[c]||0}</span>`;
     rows.appendChild(div);
   }
