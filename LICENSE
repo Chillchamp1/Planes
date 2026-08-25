@@ -1,0 +1,43 @@
+MIT License
+
+Copyright (c) 2026 Chillchamp1
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+This licence covers the software in this repository: index.html and the
+builder under build/. Use it for anything, including commercially; the one
+condition is that this notice travels with it.
+
+It does NOT and legally cannot cover the flight and map data under data/,
+which is derived from third-party sources that keep their own terms:
+
+- **Flight records** — OpenSky Network ADS-B data, mirrored as plain CSV by
+  ActiveConclusion's [COVID19_AirTraffic](https://github.com/ActiveConclusion/COVID19_AirTraffic)
+  (MIT). If you reuse the underlying flight data, OpenSky asks for a citation:
+  Schäfer, M., Strohmeier, M., Lenders, V., Martinovic, I., Wilhelm, M.
+  "Bringing Up OpenSky: A Large-scale ADS-B Sensor Network for Research."
+  IPSN 2014.
+- **Airport coordinates** — [OurAirports](https://github.com/davidmegginson/ourairports-data),
+  released into the public domain by its maintainers.
+- **Basemap** — [Natural Earth](https://www.naturalearthdata.com/) via
+  [world-atlas](https://github.com/topojson/world-atlas), public domain.
+
+If you reuse the data, credit the original publishers.

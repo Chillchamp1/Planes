@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A Day of Flights over Germany</title>
+<meta name="description" content="Every flight that touched a German airport on one real Wednesday, animated from OpenSky ADS-B records.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* Same palette as the rail project this is styled after: a near-black
+     ground so the aircraft stay the only bright thing on it, at every hour. */
+  :root{
+    --bg-bot:#0a1018;
+    --ink:#e9eff7; --ink-2:#a7b3c4; --ink-3:#78859a;
+    --rule:rgba(39,51,63,0.7); --panel:rgba(13,20,30,0.82);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg-bot); color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    font-weight:300; overflow:hidden; -webkit-font-smoothing:antialiased;
+  }
+  #stage{position:fixed;inset:0;overflow:hidden}
+  #map{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  header{
+    position:fixed;z-index:3;left:50%;top:22px;transform:translateX(-50%);
+    text-align:center;pointer-events:none;white-space:nowrap;
+    text-shadow:0 0 10px var(--bg-bot),0 0 4px var(--bg-bot);
+  }
+  #clock{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:300;
+    font-size:clamp(2rem,4.6vw,3rem);letter-spacing:0.02em;color:var(--ink);
+  }
+  #clock .hrs,#clock .mins{font-variant-numeric:tabular-nums}
+  #running{margin-top:2px;font-size:0.68rem;letter-spacing:0.06em;
+           font-family:"IBM Plex Mono",monospace;color:var(--ink-3)}
+
+  #meta{
+    position:fixed;z-index:4;left:14px;top:56px;max-width:340px;
+    font-size:0.72rem;line-height:1.55;color:var(--ink-3);
+  }
+  #meta strong{color:var(--ink-2);font-weight:500}
+
+  #key{
+    position:fixed;z-index:4;right:14px;bottom:14px;width:230px;
+    background:var(--panel);border:1px solid var(--rule);border-radius:8px;
+    padding:10px 12px;font-size:0.76rem;
+  }
+  #key h2{font-size:0.62rem;letter-spacing:0.17em;text-transform:uppercase;
+          color:var(--ink-3);font-weight:500;margin-bottom:9px}
+  .lg{display:flex;align-items:center;gap:9px;padding:3px 0}
+  .lg .sw{width:8px;height:8px;border-radius:50%;flex:none}
+  .lg .nm{flex:1 1 auto;color:var(--ink)}
+  .lg .n{font-family:"IBM Plex Mono",monospace;font-size:0.76rem;
+         color:var(--ink-2);font-variant-numeric:tabular-nums}
+  #key p{margin-top:9px;padding-top:9px;border-top:1px solid var(--rule);
+         font-size:0.66rem;line-height:1.45;color:var(--ink-3)}
+
+  #controls{
+    position:fixed;z-index:5;left:50%;bottom:14px;transform:translateX(-50%);
+    display:flex;align-items:center;gap:10px;
+    background:var(--panel);border:1px solid var(--rule);border-radius:10px;
+    padding:8px 10px;
+  }
+  #controls button{
+    font:inherit;font-size:0.78rem;color:var(--ink);background:transparent;
+    border:1px solid var(--rule);border-radius:6px;padding:5px 10px;cursor:pointer;
+  }
+  #controls button[aria-pressed="true"]{color:var(--ink);border-color:var(--ink-3)}
+  #profile{position:relative;width:min(46vw,420px);height:40px}
+  #profcv{position:absolute;inset:0;width:100%;height:100%}
+  #scrub{
+    position:absolute;inset:0;width:100%;height:100%;appearance:none;
+    background:transparent;cursor:pointer;
+  }
+  #scrub::-webkit-slider-thumb{
+    appearance:none;width:3px;height:40px;border:0;border-radius:1px;
+    background:var(--ink);cursor:pointer;
+  }
+  #scrub::-moz-range-thumb{width:3px;height:40px;border:0;border-radius:1px;
+                            background:var(--ink);cursor:pointer}
+  #scrub::-moz-range-track{background:transparent}
+  .spd{display:flex;gap:4px}
+  .spd button{padding:5px 8px;font-family:"IBM Plex Mono",monospace;font-size:0.72rem}
+
+  #caveats{
+    position:fixed;z-index:4;left:14px;bottom:14px;max-width:300px;
+    font-size:0.66rem;line-height:1.5;color:var(--ink-3);
+  }
+  #caveats summary{cursor:pointer;color:var(--ink-2);font-size:0.68rem;
+                   letter-spacing:0.06em}
+#caveats div{margin-top:8px;background:var(--panel);border:1px solid var(--rule);
+               border-radius:8px;padding:10px 12px}
+
+  #tooltip{
+    position:fixed;z-index:8;pointer-events:none;display:none;
+    background:var(--panel);border:1px solid var(--rule);border-radius:6px;
+    padding:6px 10px;font-size:0.76rem;white-space:nowrap;
+  }
+  #tooltip .th{color:var(--ink-2);font-size:0.72rem}
+
+  #loading{
+    position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:var(--bg-bot);font-size:0.8rem;color:var(--ink-3);z-index:9;
+  }
+  #loading[hidden]{display:none}
+
+  a{color:var(--ink-2)}
+
+  @media (max-width:820px){
+    header{top:14px}
+    #clock{font-size:1.7rem}
+    #meta{top:80px;max-width:calc(100vw - 28px);font-size:0.68rem}
+    #controls{flex-direction:column;left:14px;right:14px;bottom:14px;
+              transform:none;width:auto}
+    #profile{width:100%}
+    #caveats{position:fixed;left:14px;bottom:auto;top:210px;
+             max-width:min(60vw,260px)}
+    #key{width:min(58vw,230px);bottom:auto;top:210px;font-size:0.7rem}
+    #key p{display:none}
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="map"></canvas>
+  <header>
+    <div id="clock"><span class="hrs">--</span><span class="mins">:--</span></div>
+    <div id="running">&nbsp;</div>
+  </header>
+  <div id="meta"></div>
+  <div id="key">
+    <h2>Flight category</h2>
+    <div id="keyrows"></div>
+    <p>Count = aircraft airborne right now. A ring opens where a flight
+       leaves the ground. Categories are set purely by great-circle
+       distance from the German airport, not by airline or aircraft type.</p>
+  </div>
+  <details id="caveats">
+    <summary>Data notes</summary>
+    <div id="caveats-body"></div>
+  </details>
+  <div id="controls">
+    <button id="play" aria-pressed="true">Pause</button>
+    <div id="profile">
+      <canvas id="profcv"></canvas>
+      <input id="scrub" type="range" min="0" max="1439" step="1" value="0"
+             aria-label="Time of day. The strip behind shows how many flights depart each hour.">
+    </div>
+    <div class="spd" role="group" aria-label="Playback speed">
+      <button data-mps="6">1&times;</button>
+      <button data-mps="12" aria-pressed="true">2&times;</button>
+      <button data-mps="24">4&times;</button>
+    </div>
+  </div>
+</div>
+<div id="tooltip"><span class="tn"></span><br><span class="th"></span></div>
+<div id="loading">Loading flights&hellip;</div>
+
+<script>
+(() => {
+"use strict";
+
+/* Same palette family as the rail project. Three categories, three roles:
+   short domestic hops read green like a regional train, the European
+   backbone reads blue like an intercity, and the long-haul flights that
+   cross an ocean get the warm gold a night train gets there -- the flight
+   that is still going when everything else has landed. */
+const PAL = {
+  bgTop:"#05080e", bgBot:"#0a1018",
+  land:"#121a26", landLine:"#1d2735", landEdge:"#35435a",
+  ink:"#e9eff7", ink2:"#a7b3c4", ink3:"#78859a",
+  rule:"#27333f", panel:"#0d141e",
+  station:"#2b3849", hub:"#46586f",
+  domestic:"#35d69a", european:"#5aa9ff", longhaul:"#ffd93d",
+};
+const hex2rgb = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+const RGB = {}; for (const k in PAL) RGB[k] = hex2rgb(PAL[k]);
+const pick = role => RGB[role];
+const css  = c => `rgb(${c[0]},${c[1]},${c[2]})`;
+const rgba = (c,a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+const CLASS_LABEL = {
+  domestic: "Domestic — within Germany",
+  european: "European",
+  longhaul: "Long-haul — outside Europe",
+};
+const CLASS_ROLE = {domestic:"domestic", european:"european", longhaul:"longhaul"};
+
+/* The visible window. Frankfurt to Los Angeles or Tokyo flies off the edge
+   of it, same as a cross-border train used to fly off the edge of a
+   single-country map -- the dot keeps moving correctly, it just leaves the
+   frame, because the point of this map is Germany's sky, not the world's. */
+const CORE = {lon0:-14.0, lon1:34.0, lat0:35.5, lat1:60.0};
+
+let GEO = null, DATA = null, ST = [];
+let W=0, H=0, OX=0, OY=0, SX=0, SY=0, DPR=1;
+let VIEW = {...CORE};
+const ux = lon => (lon-VIEW.lon0)/(VIEW.lon1-VIEW.lon0);
+const uy = lat => (VIEW.lat1-lat)/(VIEW.lat1-VIEW.lat0);
+
+const stage = document.getElementById("stage");
+const cv = document.getElementById("map");
+const ctx = cv.getContext("2d");
+let base = null, baseCtx = null, baseReady = false;
+let pathLand = null, pathStates = null;
+
+function resize(){
+  if (!DATA) return;
+  const dpr = Math.min(window.devicePixelRatio||1, 3);
+  W = stage.clientWidth; H = stage.clientHeight;
+  if (!W || !H) return;
+  DPR = dpr;
+  cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const k = Math.cos(((CORE.lat0+CORE.lat1)/2) * Math.PI/180);
+  const w = (CORE.lon1-CORE.lon0)*k, h = CORE.lat1-CORE.lat0;
+  const aspect = W/H;
+  let {lon0,lon1,lat0,lat1} = CORE;
+  if (aspect > w/h){
+    const extra = aspect*h/k - (lon1-lon0);
+    lon0 -= extra/2; lon1 += extra/2;
+  } else {
+    const extra = w/aspect - h;
+    lat0 -= extra/2; lat1 += extra/2;
+  }
+  VIEW = {lon0,lon1,lat0,lat1};
+  OX = 0; OY = 0; SX = W; SY = H;
+
+  base = document.createElement("canvas");
+  base.width = cv.width; base.height = cv.height;
+  baseCtx = base.getContext("2d");
+  baseCtx.setTransform(dpr,0,0,dpr,0,0);
+  buildBasemap();
+  placeLabels();
+  renderBase();
+  lastMinute = -1;
+}
+
+function buildBasemap(){
+  const ring = (path, r) => {
+    path.moveTo(OX+ux(r[0][0])*SX, OY+uy(r[0][1])*SY);
+    for (let i=1;i<r.length;i++) path.lineTo(OX+ux(r[i][0])*SX, OY+uy(r[i][1])*SY);
+    path.closePath();
+  };
+  pathLand = new Path2D();
+  for (const r of GEO.outline) ring(pathLand, r);
+  pathStates = new Path2D();
+  for (const r of GEO.states) ring(pathStates, r);
+}
+
+function renderBase(){
+  const b = baseCtx;
+  b.clearRect(0,0,W,H);
+  const g = b.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, css(pick("bgTop")));
+  g.addColorStop(1, css(pick("bgBot")));
+  b.fillStyle = g; b.fillRect(0,0,W,H);
+  if (pathLand){
+    b.fillStyle = css(pick("land"));
+    b.fill(pathLand, "evenodd");
+    b.lineJoin = "round";
+    b.strokeStyle = rgba(pick("landLine"), 0.75);
+    b.lineWidth = 0.7;
+    b.stroke(pathStates);
+    b.strokeStyle = rgba(pick("landEdge"), 0.9);
+    b.lineWidth = 1.0;
+    b.stroke(pathLand);
+  }
+  const cSt = pick("station"), cHub = pick("hub");
+  for (const s of ST){
+    if (s.x < -20 || s.x > W+20 || s.y < -20 || s.y > H+20) continue;
+    b.beginPath();
+    b.arc(s.x, s.y, s.hub ? 2.0 : 1.1, 0, 6.2832);
+    b.fillStyle = rgba(s.hub ? cHub : cSt, s.hub ? 0.95 : 0.6);
+    b.fill();
+  }
+  for (const L of PLACED){
+    b.font = '400 11px "IBM Plex Sans",system-ui,sans-serif';
+    b.textAlign = L.align; b.textBaseline = "middle";
+    b.fillStyle = rgba(pick(L.major?"ink2":"ink3"), L.major?0.95:0.75);
+    b.fillText(L.label, L.tx, L.ty);
+  }
+  baseReady = true;
+}
+
+/* City labels: majors first, each trying its preferred side then the
+   flipped side, skipping anything that would collide with an
+   already-placed label. Simple, and this map only needs a dozen names. */
+const CITIES = [
+  ["Frankfurt",50.0379,8.5622,1], ["Munich",48.3538,11.7861,1],
+  ["Berlin",52.3667,13.5033,1],   ["Düsseldorf",51.2895,6.7668,1],
+  ["Hamburg",53.6304,9.9882,1],   ["Stuttgart",48.6899,9.2220,1],
+  ["Cologne",50.8659,7.1427,0],   ["Vienna",48.1103,16.5697,0],
+  ["Zurich",47.4647,8.5492,0],    ["Amsterdam",52.3086,4.7639,0],
+  ["London",51.4700,-0.4543,0],   ["Paris",49.0097,2.5479,0],
+  ["Madrid",40.4936,-3.5668,0],   ["Rome",41.8003,12.2389,0],
+  ["Copenhagen",55.6180,12.6560,0], ["Warsaw",52.1657,20.9671,0],
+  ["Moscow",55.9736,37.4125,0],   ["Istanbul",41.2753,28.7519,0],
+  ["Dubai",25.2532,55.3657,0],    ["New York",40.6413,-73.7781,0],
+];
+let PLACED = [];
+function placeLabels(){
+  PLACED = [];
+  ctx.font = '400 11px "IBM Plex Sans",system-ui,sans-serif';
+  const taken = [];
+  const hits = r => r.x<2 || r.y<2 || r.x+r.w>W-2 ||
+    taken.some(t => r.x<t.x+t.w && r.x+r.w>t.x && r.y<t.y+t.h && r.y+r.h>t.y);
+  for (const [label,lat,lon,major] of CITIES){
+    const x = OX+ux(lon)*SX, y = OY+uy(lat)*SY;
+    if (x < -20 || x > W+20 || y < -20 || y > H+20) continue;
+    const tw = ctx.measureText(label).width;
+    const opts = [
+      {tx:x+9, ty:y, align:"left",  x:x+7,  y:y-6, w:tw+6, h:12},
+      {tx:x-9, ty:y, align:"right", x:x-9-tw, y:y-6, w:tw+6, h:12},
+      {tx:x, ty:y+13, align:"center", x:x-tw/2-2, y:y+7, w:tw+4, h:12},
+    ];
+    for (const o of opts){
+      if (!hits(o)){ taken.push(o); PLACED.push({...o, label, major}); break; }
+    }
+  }
+}
+
+/* ====================================================================== */
+/* Playback */
+let simMin = 0, playing = true, mps = 12; // simulated minutes per real second
+let lastMinute = -1;
+const scrub = document.getElementById("scrub");
+const playBtn = document.getElementById("play");
+const elHrs = document.querySelector("#clock .hrs");
+const elMins = document.querySelector("#clock .mins");
+const elRunning = document.getElementById("running");
+
+function hm(min){
+  const m = ((Math.round(min) % 1440) + 1440) % 1440;
+  return [String(Math.floor(m/60)).padStart(2,"0"), String(m%60).padStart(2,"0")];
+}
+
+let lastT = null;
+function frame(now){
+  requestAnimationFrame(frame);
+  if (lastT == null) lastT = now;
+  const dt = Math.min(0.25, (now-lastT)/1000); lastT = now;
+  if (playing){
+    simMin += dt*mps;
+    if (simMin >= 1440){ simMin -= 1440; }
+    scrub.value = Math.round(simMin);
+  }
+  draw();
+}
+
+let hitList = [];
+function draw(){
+  if (!baseReady) return;
+  ctx.clearRect(0,0,W,H);
+  ctx.drawImage(base, 0,0, W,H);
+
+  const counts = {domestic:0, european:0, longhaul:0};
+  hitList = [];
+  for (const t of DATA.trips){
+    const dep = t.s[0][1], arr = t.s[1][1];
+    if (simMin < dep || simMin > arr) continue;
+    const cls = DATA.classes[t.c];
+    counts[cls]++;
+    const oi = t.s[0][0], di = t.s[1][0];
+    const o = ST[oi], d = ST[di];
+    const f = arr>dep ? (simMin-dep)/(arr-dep) : 0;
+    const ox = OX+ux(o.lon)*SX, oy = OY+uy(o.lat)*SY;
+    const dx = OX+ux(d.lon)*SX, dy = OY+uy(d.lat)*SY;
+    const x = ox+(dx-ox)*f, y = oy+(dy-oy)*f;
+    const col = pick(CLASS_ROLE[cls]);
+    // Trail back toward departure -- a comet, not a dot on a wire.
+    const tf = Math.max(0, f-0.12);
+    const tx = ox+(dx-ox)*tf, ty = oy+(dy-oy)*tf;
+    ctx.strokeStyle = rgba(col, 0.35);
+    ctx.lineWidth = 1.1;
+    ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(x,y); ctx.stroke();
+    // A ring that opens at departure and fades over a few minutes.
+    const sinceStart = simMin-dep;
+    if (sinceStart >= 0 && sinceStart < 6){
+      const rf = sinceStart/6;
+      ctx.beginPath(); ctx.arc(ox,oy, 1.2+rf*6, 0, 6.2832);
+      ctx.strokeStyle = rgba(col, (1-rf)*0.5); ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(x,y, 1.9, 0, 6.2832);
+    ctx.fillStyle = css(col);
+    ctx.fill();
+    hitList.push({x,y,name:t.n||"", from:o.name, to:d.name, cls});
+  }
+  const [h,m] = hm(simMin);
+  elHrs.textContent = h; elMins.textContent = ":" + m;
+  if (Math.floor(simMin) !== lastMinute){
+    lastMinute = Math.floor(simMin);
+    const total = counts.domestic+counts.european+counts.longhaul;
+    elRunning.textContent = `${total} aircraft airborne`;
+    for (const k of Object.keys(counts)){
+      const el = document.getElementById("kc-"+k);
+      if (el) el.textContent = counts[k];
+    }
+    drawProfile();
+  }
+}
+
+/* ====================================================================== */
+/* Day-profile strip: departures per 15-minute bucket, behind the scrubber. */
+const profcv = document.getElementById("profcv");
+const pctx = profcv.getContext("2d");
+let PROFILE = null;
+function buildProfile(){
+  const buckets = new Array(96).fill(0); // 96 * 15min = a day
+  for (const t of DATA.trips){
+    const b = Math.max(0, Math.min(95, Math.floor(t.s[0][1]/15)));
+    buckets[b]++;
+  }
+  PROFILE = buckets;
+}
+function sizeProfile(){
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  const w = profcv.clientWidth, h = profcv.clientHeight;
+  if (!w || !h) return;
+  profcv.width = w*dpr; profcv.height = h*dpr;
+  pctx.setTransform(dpr,0,0,dpr,0,0);
+  drawProfile();
+}
+function drawProfile(){
+  if (!PROFILE) return;
+  const w = profcv.clientWidth, h = profcv.clientHeight;
+  pctx.clearRect(0,0,w,h);
+  const mx = Math.max(...PROFILE, 1);
+  const bw = w/PROFILE.length;
+  const curBucket = Math.floor(simMin/15);
+  for (let i=0;i<PROFILE.length;i++){
+    const bh = (PROFILE[i]/mx) * (h-4);
+    pctx.fillStyle = rgba(pick(i===curBucket?"ink2":"ink3"), i===curBucket?0.9:0.4);
+    pctx.fillRect(i*bw+0.5, h-bh, Math.max(1,bw-1), bh);
+  }
+}
+
+/* ====================================================================== */
+/* Loading + wiring */
+function applyData(data, geo){
+  DATA = data; GEO = geo;
+  ST = data.stations.map(s => ({lon:s[0], lat:s[1], name:s[2], calls:0, x:0, y:0}));
+  for (const t of data.trips){ ST[t.s[0][0]].calls++; ST[t.s[1][0]].calls++; }
+  const sorted = ST.map(s=>s.calls).sort((a,b)=>b-a);
+  const cut = sorted[Math.min(11, sorted.length-1)] || 0;
+  for (const s of ST) s.hub = s.calls >= Math.max(cut, 8);
+  buildProfile();
+
+  const total = data.trips.length;
+  document.getElementById("meta").innerHTML =
+    `<strong>${total} flights</strong> touched a German airport on ` +
+    `${data.weekday} ${data.date} — real ADS-B tracks from the OpenSky ` +
+    `Network, not a published timetable (there isn't one).`;
+  const rows = document.getElementById("keyrows");
+  rows.innerHTML = "";
+  for (const c of data.classes){
+    const col = pick(CLASS_ROLE[c]);
+    const div = document.createElement("div");
+    div.className = "lg";
+    div.innerHTML = `<span class="sw" style="background:${css(col)}"></span>` +
+      `<span class="nm">${CLASS_LABEL[c]}</span>` +
+      `<span class="n" id="kc-${c}">${data.counts[c]||0}</span>`;
+    rows.appendChild(div);
+  }
+  document.getElementById("caveats-body").innerHTML = `
+    <p><strong>There is no GTFS for aviation.</strong> Flight schedules are
+    commercial data (IATA SSIM), sold by OAG and Cirium, not published as
+    open data. What is open is radar: the OpenSky Network crowdsources
+    ADS-B receivers worldwide and reconstructs a flight list -- callsign,
+    origin airport, destination airport, first- and last-seen timestamps.
+    That is structurally the same as a GTFS trip, minus the timetable, and
+    it is what this map is built from.</p>
+    <p style="margin-top:8px">The mirror this reads from (ActiveConclusion's
+    COVID19_AirTraffic on GitHub) only covers January-April 2020. European
+    travel restrictions began in mid-March, so a January Wednesday --
+    <strong>15 January 2020</strong> -- is real, ordinary traffic, not a
+    locked-down sky. It is not today; it is the newest openly mirrored day
+    that is not COVID-depressed.</p>
+    <p style="margin-top:8px">First-seen and last-seen are radar coverage,
+    not gate times -- first-seen is usually seconds after wheels-up,
+    last-seen the last message before landing or leaving coverage. A small
+    number of flights (about 1 in 500) were dropped as physically
+    impossible -- a transponder still broadcasting on the ground for a day
+    reads as a flight that took a day to go nowhere.</p>
+    <p style="margin-top:8px">Only flights touching a German airport are
+    shown -- overflight traffic passing through German airspace without
+    landing or departing here is invisible to this dataset. Categories
+    are set by great-circle distance, not by airline.</p>
+    <p style="margin-top:8px">Source:
+    <a href="https://opensky-network.org/" target="_blank" rel="noopener">OpenSky Network</a>,
+    via <a href="https://github.com/ActiveConclusion/COVID19_AirTraffic" target="_blank" rel="noopener">ActiveConclusion/COVID19_AirTraffic</a>.
+    Airport coordinates: <a href="https://github.com/davidmegginson/ourairports-data" target="_blank" rel="noopener">OurAirports</a>.
+    Basemap: <a href="https://github.com/topojson/world-atlas" target="_blank" rel="noopener">Natural Earth via world-atlas</a>, public domain.</p>`;
+
+  resize();
+  document.getElementById("loading").hidden = true;
+}
+
+async function boot(){
+  const [data, geo] = await Promise.all([
+    fetch("data/planes.json").then(r=>r.json()),
+    fetch("data/planes-geo.json").then(r=>r.json()),
+  ]);
+  applyData(data, geo);
+}
+
+playBtn.addEventListener("click", () => {
+  playing = !playing;
+  playBtn.setAttribute("aria-pressed", String(playing));
+  playBtn.textContent = playing ? "Pause" : "Play";
+});
+scrub.addEventListener("input", () => {
+  simMin = Number(scrub.value); playing = false;
+  playBtn.setAttribute("aria-pressed","false"); playBtn.textContent = "Play";
+  lastMinute = -1;
+});
+document.querySelectorAll(".spd button").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".spd button[data-mps]").forEach(x=>x.removeAttribute("aria-pressed"));
+    b.setAttribute("aria-pressed","true");
+    mps = Number(b.dataset.mps);
+  });
+});
+
+cv.addEventListener("pointermove", e => {
+  const r = cv.getBoundingClientRect();
+  const x = e.clientX-r.left, y = e.clientY-r.top;
+  let best = null, bd = 64;
+  for (const h of hitList){
+    const d = (h.x-x)**2 + (h.y-y)**2;
+    if (d < bd){ bd = d; best = h; }
+  }
+  const tip = document.getElementById("tooltip");
+  if (best){
+    tip.style.display = "block";
+    tip.style.left = (e.clientX+14)+"px"; tip.style.top = (e.clientY+14)+"px";
+    tip.querySelector(".tn").textContent = best.name || CLASS_LABEL[best.cls];
+    tip.querySelector(".th").textContent = `${best.from} → ${best.to}`;
+  } else tip.style.display = "none";
+});
+cv.addEventListener("pointerleave", () => { document.getElementById("tooltip").style.display="none"; });
+
+new ResizeObserver(resize).observe(stage);
+new ResizeObserver(sizeProfile).observe(document.getElementById("profile"));
+requestAnimationFrame(frame);
+boot();
+})();
+</script>
+</body>
+</html>
